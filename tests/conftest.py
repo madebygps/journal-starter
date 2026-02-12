@@ -20,13 +20,21 @@ async def cleanup_database():
     """
     Automatically clean up the database before each test.
     This ensures test isolation.
+    Silently skips cleanup if the database is unavailable
+    (e.g., for model-only tests that don't need a DB connection).
     """
-    async with PostgresDB() as db:
-        await db.delete_all_entries()
+    try:
+        async with PostgresDB() as db:
+            await db.delete_all_entries()
+    except Exception:
+        pass
     yield
     # Clean up after test as well
-    async with PostgresDB() as db:
-        await db.delete_all_entries()
+    try:
+        async with PostgresDB() as db:
+            await db.delete_all_entries()
+    except Exception:
+        pass
 
 
 @pytest.fixture

@@ -45,27 +45,11 @@ async def get_all_entries(entry_service: EntryService = Depends(get_entry_servic
 
 @router.get("/entries/{entry_id}")
 async def get_entry(entry_id: str, entry_service: EntryService = Depends(get_entry_service)):
-    """
-    TODO: Implement this endpoint to return a single journal entry by ID
-
-    Steps to implement:
-    1. Use entry_service.get_entry(entry_id) to fetch the entry
-    2. If entry is None, raise HTTPException with status_code=404
-    3. Return the entry directly (not wrapped in a dict)
-
-    Example response (status 200):
-    {
-        "id": "uuid-string",
-        "work": "...",
-        "struggle": "...",
-        "intention": "...",
-        "created_at": "...",
-        "updated_at": "..."
-    }
-
-    Hint: Check the update_entry endpoint for similar patterns
-    """
-    raise HTTPException(status_code=501, detail="Not implemented - complete this endpoint!")
+    """Get a single journal entry by ID."""
+    entry = await entry_service.get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return entry
 
 @router.patch("/entries/{entry_id}")
 async def update_entry(entry_id: str, entry_update: dict, entry_service: EntryService = Depends(get_entry_service)):
@@ -77,25 +61,14 @@ async def update_entry(entry_id: str, entry_update: dict, entry_service: EntrySe
 
     return result
 
-# TODO: Implement DELETE /entries/{entry_id} endpoint to remove a specific entry
-# Return 404 if entry not found
 @router.delete("/entries/{entry_id}")
 async def delete_entry(entry_id: str, entry_service: EntryService = Depends(get_entry_service)):
-    """
-    TODO: Implement this endpoint to delete a specific journal entry
-
-    Steps to implement:
-    1. Use entry_service.get_entry(entry_id) to check if entry exists
-    2. If entry is None, raise HTTPException with status_code=404
-    3. Use entry_service.delete_entry(entry_id) to delete the entry
-    4. Return a success response (status 200)
-
-    Example response (status 200):
-    {"detail": "Entry deleted successfully"}
-
-    Hint: Look at how the update_entry endpoint checks for existence
-    """
-    raise HTTPException(status_code=501, detail="Not implemented - complete this endpoint!")
+    """Delete a specific journal entry."""
+    entry = await entry_service.get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    await entry_service.delete_entry(entry_id)
+    return {"detail": "Entry deleted successfully"}
 
 @router.delete("/entries")
 async def delete_all_entries(entry_service: EntryService = Depends(get_entry_service)):
@@ -105,25 +78,18 @@ async def delete_all_entries(entry_service: EntryService = Depends(get_entry_ser
 
 @router.post("/entries/{entry_id}/analyze")
 async def analyze_entry(entry_id: str, entry_service: EntryService = Depends(get_entry_service)):
-    """
-    Analyze a journal entry using AI.
+    """Analyze a journal entry using AI."""
+    from api.services.llm_service import analyze_journal_entry
 
-    Returns sentiment, summary, key topics, entry_id, and created_at timestamp.
+    entry = await entry_service.get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Entry not found")
 
-    Response format:
-    {
-        "entry_id": "string",
-        "sentiment": "positive | negative | neutral",
-        "summary": "2 sentence summary of the entry",
-        "topics": ["topic1", "topic2", "topic3"],
-        "created_at": "timestamp"
-    }
+    entry_text = (
+        f"Work: {entry['work']}. "
+        f"Struggle: {entry['struggle']}. "
+        f"Intention: {entry['intention']}."
+    )
 
-    TODO: Implement this endpoint. Steps:
-    1. Fetch the entry from database using entry_service.get_entry(entry_id)
-    2. Return 404 if entry not found
-    3. Combine work + struggle + intention into text
-    4. Call llm_service.analyze_journal_entry(entry_text)
-    5. Return the analysis result with entry_id and created_at timestamp
-    """
-    raise HTTPException(status_code=501, detail="Implement this endpoint - see Learn to Cloud curriculum")
+    analysis = await analyze_journal_entry(entry_id, entry_text)
+    return analysis
