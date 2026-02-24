@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+      - job_name: "journal-api"
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["journal-api.default.svc.cluster.local:80"]

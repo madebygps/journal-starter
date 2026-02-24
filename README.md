@@ -4,9 +4,45 @@ Welcome to your Python capstone project! You'll be working with a **FastAPI + Po
 
 By the end of this capstone, your API should be working locally and ready for cloud deployment.
 
+## Project Structure
+
+```
+journal-starter/
+├── Dockerfile                 # Container definition
+├── .dockerignore              # Files excluded from Docker build
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml          # CI/CD pipeline (test → build → deploy)
+├── infra/                     # Terraform IaC for Azure
+│   ├── main.tf                # Resource definitions (ACR, AKS, PostgreSQL)
+│   ├── variables.tf           # Input variables
+│   ├── outputs.tf             # Output values
+│   └── providers.tf           # Provider configuration
+├── k8s/                       # Kubernetes manifests
+│   ├── deployment.yaml        # App deployment (2 replicas, health probes)
+│   ├── service.yaml           # LoadBalancer service
+│   ├── secrets.yaml.example   # Example secrets (never commit real values!)
+│   └── monitoring/            # Prometheus + Grafana stack
+│       ├── prometheus-config.yaml
+│       ├── prometheus-deployment.yaml
+│       └── grafana-deployment.yaml
+├── api/                       # FastAPI application
+│   ├── main.py                # App entry point (/health, /metrics)
+│   ├── models/                # Pydantic data models
+│   ├── routers/               # API route handlers
+│   ├── repositories/          # Database access layer
+│   └── services/              # Business logic + LLM integration
+├── tests/                     # Pytest test suite
+├── database_setup.sql         # PostgreSQL schema init
+├── pyproject.toml             # Python project config
+├── start.sh                   # Local dev startup script
+└── README.md                  # This file
+```
+
 ## Table of Contents
 
 - [Getting Started](#-getting-started)
+- [Cloud Deployment](#-cloud-deployment)
 - [Development Workflow](#-development-workflow)
 - [Development Tasks](#-development-tasks)
 - [Data Schema](#-data-schema)
@@ -96,6 +132,100 @@ Then start the API from the **project root**:
 1. **View your entries** using the GET `/entries` endpoint to see what you've created!
 
 **🎯 Once you can create and see entries, you're ready to start the development tasks!**
+
+## ☁️ Cloud Deployment
+
+### Step 1: Build the Docker Image
+
+```bash
+# Build locally
+docker build -t journal-api .
+
+# Test locally (requires a running PostgreSQL instance)
+docker run -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/career_journal \
+  -p 8000:8000 journal-api
+
+# Verify
+curl http://localhost:8000/health
+```
+
+### Step 2: Provision Infrastructure with Terraform
+
+```bash
+cd infra
+
+# Create a terraform.tfvars file with your values
+cat > terraform.tfvars <<EOF
+subscription_id         = "your-subscription-id"
+acr_name                = "yourUniqueName"
+postgres_admin_password = "YourSecurePassword123!"
+EOF
+
+terraform init
+terraform plan
+terraform apply
+```
+
+### Step 3: Push Image to ACR and Deploy
+
+```bash
+# Get ACR credentials
+ACR_SERVER=$(terraform output -raw acr_login_server)
+az acr login --name $(terraform output -raw acr_login_server | cut -d. -f1)
+
+# Build & push
+docker build -t $ACR_SERVER/journal-api:latest ..
+docker push $ACR_SERVER/journal-api:latest
+
+# Connect to AKS
+az aks get-credentials --resource-group journal-api-rg --name journal-aks
+
+# Initialize the database schema
+PGFQDN=$(terraform output -raw postgres_fqdn)
+PGPASSWORD='YourSecurePassword123!' psql "host=$PGFQDN port=5432 dbname=career_journal user=pgadmin sslmode=require" -f ../database_setup.sql
+
+# Create Kubernetes secrets
+kubectl create secret generic journal-api-secrets \
+  --from-literal=DATABASE_URL="$(terraform output -raw database_url)" \
+  --from-literal=OPENAI_API_KEY="your-key" \
+  --from-literal=OPENAI_BASE_URL="https://models.inference.ai.azure.com" \
+  --from-literal=OPENAI_MODEL="gpt-4o-mini"
+
+# Deploy
+sed "s|IMAGE_PLACEHOLDER|$ACR_SERVER/journal-api:latest|g" ../k8s/deployment.yaml | kubectl apply -f -
+kubectl apply -f ../k8s/service.yaml
+
+# Check status
+kubectl get pods
+kubectl get svc journal-api
+```
+
+### Step 4: Set Up GitHub Actions Secrets
+
+In your GitHub repo under **Settings → Secrets and variables → Actions**, add:
+
+| Secret                 | Value                                          |
+|------------------------|------------------------------------------------|
+| `AZURE_CREDENTIALS`   | Output of `az ad sp create-for-rbac --sdk-auth`|
+| `ACR_LOGIN_SERVER`    | e.g. `yourname.azurecr.io`                     |
+| `ACR_USERNAME`        | ACR admin username                             |
+| `ACR_PASSWORD`        | ACR admin password                             |
+| `AZURE_RESOURCE_GROUP`| `journal-api-rg`                               |
+| `AKS_CLUSTER_NAME`   | `journal-aks`                                  |
+
+### Step 5: Monitoring (Optional)
+
+```bash
+# Deploy Prometheus + Grafana
+kubectl apply -f k8s/monitoring/
+
+# Access Grafana (default: admin/admin)
+kubectl get svc grafana    # Note the EXTERNAL-IP
+```
+
+Visit `http://<GRAFANA-EXTERNAL-IP>:3000` and the Prometheus datasource is pre-configured.
+
+The API exposes `/metrics` (Prometheus format) with request count, latency histograms, and in-progress request gauges.
 
 ## 🔄 Development Workflow
 
@@ -286,6 +416,28 @@ For **Task 3: AI-Powered Entry Analysis**, your endpoint should return this form
    ```
    > **Phase 4 preview:** In Phase 4, you'll migrate this same code to a cloud AI platform (Azure OpenAI, AWS Bedrock, or GCP Vertex AI). Since they all support the OpenAI SDK, the migration is just an environment variable change — no code rewrite needed.
 ## 🔧 Troubleshooting
+
+### Cloud Deployment Issues
+
+**Docker build fails?**
+- Make sure you're running `docker build` from the **project root** (where the `Dockerfile` is)
+- Check that `uv.lock` is committed — the Dockerfile uses `--frozen` which requires it
+
+**Terraform apply fails?**
+- Run `az login` first and verify your subscription: `az account show`
+- ACR names must be globally unique and alphanumeric only
+- PostgreSQL passwords must be at least 8 characters
+
+**AKS pods aren't starting?**
+- Check pod logs: `kubectl logs -l app=journal-api`
+- Verify secrets exist: `kubectl get secret journal-api-secrets`
+- Check events: `kubectl describe pod -l app=journal-api`
+
+**Health check returns 503?**
+- Ensure `DATABASE_URL` is set correctly with `?sslmode=require` for Azure PostgreSQL
+- Check that the database schema has been initialized (run `database_setup.sql`)
+
+### Local Development Issues
 
 **API won't start?**
 - Make sure you're running `./start.sh` from the **project root** inside the dev container

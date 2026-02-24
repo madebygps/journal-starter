@@ -13,6 +13,7 @@ dependencies = [
     "asyncpg",
     "pytest>=9.0.2",
     "openai>=2.21.0",
+    "prometheus-fastapi-instrumentator>=7.1.0",
 ]
 
 [project.optional-dependencies]

@@ -169,3 +169,15 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Terraform
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/*.tfstate
+infra/*.tfstate.backup
+infra/terraform.tfvars
+infra/tfplan
+*.tfvars
+
+# Kubernetes secrets (real values)
+k8s/secrets.yaml
